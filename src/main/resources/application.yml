@@ -1,0 +1,28 @@
+spring:
+  application:
+    name: jaffan-db-broker
+  main:
+    banner-mode: "off"
+
+server:
+  port: ${PORT:8080}          # CF injects PORT; 8080 for local runs
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health        # only expose the health endpoint
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never      # never leak backend details via the public health endpoint
+
+# Spring Cloud Open Service Broker: accept any OSB API version the platform sends (CF is 2.x).
+# The catalog, service and binding beans supply everything else the library needs.
+
+logging:
+  level:
+    root: INFO
+    com.jaffan.broker: INFO

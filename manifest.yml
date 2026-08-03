@@ -1,0 +1,20 @@
+---
+# Deploy with:  cf push -f manifest.yml --no-start   (then `cf set-env` the vars, then `cf start`)
+# Secrets (BROKER_*, *_ADMIN_PASSWORD, ...) are intentionally NOT in this file — set them with
+# `cf set-env` so they never land in source control. See README.md.
+applications:
+  - name: jaffan-db-broker
+    instances: 1
+    memory: 768M
+    disk_quota: 1G
+    path: target/jaffan-db-broker.jar
+    buildpacks:
+      - java_buildpack
+    health-check-type: http
+    health-check-http-endpoint: /actuator/health
+    health-check-invocation-timeout: 10
+    env:
+      # Pin the Java buildpack to a JRE 21 so the Java 21 bytecode runs.
+      JBP_CONFIG_OPEN_JDK_JRE: '{ jre: { version: 21.+ } }'
+      # Keep the buildpack's own memory heuristics happy inside 768M.
+      JBP_CONFIG_JAVA_OPTS: '{ java_opts: "-XX:MaxMetaspaceSize=128m" }'

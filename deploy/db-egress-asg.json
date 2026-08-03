@@ -1,0 +1,14 @@
+[
+  {
+    "protocol": "tcp",
+    "destination": "10.0.0.0/8",
+    "ports": "5432",
+    "description": "Allow app containers to reach the shared PostgreSQL servers (dev + prod)"
+  },
+  {
+    "protocol": "tcp",
+    "destination": "10.0.0.0/8",
+    "ports": "3306",
+    "description": "Allow app containers to reach the shared MariaDB servers (dev + prod)"
+  }
+]

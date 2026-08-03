@@ -17,7 +17,8 @@ name is a deterministic function of the OSB GUIDs, so restarting the app loses n
 2. [Catalog](#catalog)
 3. [Configuration](#configuration)
 4. [Build](#build)
-5. [Deploy to Cloud Foundry](#deploy-to-cloud-foundry)
+5. [Continuous deployment (GitHub Actions)](#continuous-deployment-github-actions)
+6. [Deploy to Cloud Foundry (manual)](#deploy-to-cloud-foundry-manual)
 6. [Register the broker](#register-the-broker)
 7. [Promote to global + enable access](#promote-to-global--enable-access)
 8. [Application Security Groups (container egress)](#application-security-groups-container-egress)
@@ -127,9 +128,70 @@ the Testcontainers integration tests are `*IT` classes bound to `mvn verify` (se
 
 ---
 
-## Deploy to Cloud Foundry
+## Continuous deployment (GitHub Actions)
 
-Push without starting, set every variable, then start. (The broker will fail to start until the
+[`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) builds and tests the broker on a
+GitHub runner, then `cf push`es the resulting jar to your (publicly reachable) Cloud Foundry.
+
+* **Build job** (runs on every push and PR to `main`): `mvn -B verify` — unit tests **and** the
+  Testcontainers `postgres:16`/`mariadb:11` lifecycle ITs, which really execute because
+  GitHub-hosted runners include Docker. A red build blocks deployment.
+* **Deploy job** (only on push to `main`): downloads the jar, installs the cf CLI v8, authenticates,
+  `cf push --no-start`, sets every configured env var, then `cf start`. Optionally (re)registers the
+  broker when the `REGISTER_BROKER` variable is `true`.
+
+> The classic CF Java buildpack does not compile source — that's exactly why the jar is built on the
+> runner and pushed, rather than pushing `src/`.
+
+### Configure secrets & variables
+
+Non-sensitive values go in repository **Variables**, credentials in repository **Secrets**
+(Settings → Secrets and variables → Actions). With the `gh` CLI:
+
+```bash
+# --- Variables (non-sensitive) ---
+gh variable set CF_API   --body "https://api.cf.example.com"
+gh variable set CF_ORG   --body "my-org"
+gh variable set CF_SPACE --body "my-space"
+gh variable set CF_SKIP_SSL_VALIDATION --body "false"   # "true" only for a self-signed API cert
+gh variable set DEPROVISION_MODE --body "soft"
+gh variable set REGISTER_BROKER  --body "true"          # optional: auto space-scoped registration
+
+gh variable set PG_DEV_HOST  --body "pg-dev.db.internal"
+gh variable set PG_DEV_PORT  --body "5432"
+gh variable set PG_PROD_HOST --body "pg-prod.db.internal"
+gh variable set PG_PROD_PORT --body "5432"
+gh variable set MARIA_DEV_HOST  --body "maria-dev.db.internal"
+gh variable set MARIA_DEV_PORT  --body "3306"
+gh variable set MARIA_PROD_HOST --body "maria-prod.db.internal"
+gh variable set MARIA_PROD_PORT --body "3306"
+# Optional per-backend external hosts (embedded in binding creds):
+# gh variable set PG_DEV_EXTERNAL_HOST --body "pg-dev.apps.internal"   (and PG_PROD_/MARIA_*)
+
+# --- Secrets (sensitive) ---
+gh secret set CF_USERNAME     --body "ci-deployer"
+gh secret set CF_PASSWORD     --body "..."
+gh secret set BROKER_USER     --body "broker-admin"
+gh secret set BROKER_PASSWORD --body "$(openssl rand -base64 24)"
+gh secret set PG_DEV_ADMIN_USER      --body "broker_admin"
+gh secret set PG_DEV_ADMIN_PASSWORD  --body "..."
+gh secret set PG_PROD_ADMIN_USER     --body "broker_admin"
+gh secret set PG_PROD_ADMIN_PASSWORD --body "..."
+gh secret set MARIA_DEV_ADMIN_USER      --body "root"
+gh secret set MARIA_DEV_ADMIN_PASSWORD  --body "..."
+gh secret set MARIA_PROD_ADMIN_USER     --body "root"
+gh secret set MARIA_PROD_ADMIN_PASSWORD --body "..."
+```
+
+The deploy job uses a `cloud-foundry` GitHub Environment — add required reviewers there if you want a
+manual approval gate before each production push. Promotion to global + `enable-service-access`
+remains a one-time admin step (see [below](#promote-to-global--enable-access)).
+
+---
+
+## Deploy to Cloud Foundry (manual)
+
+If you'd rather not use the pipeline, push without starting, set every variable, then start. (The broker will fail to start until the
 backends are configured and reachable — that's the fail-fast design.)
 
 ```bash

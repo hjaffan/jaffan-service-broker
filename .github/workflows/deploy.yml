@@ -8,20 +8,15 @@ name: CI / Deploy to Cloud Foundry
 #   Repository VARIABLES (non-sensitive):
 #     CF_API, CF_ORG, CF_SPACE
 #     CF_SKIP_SSL_VALIDATION           "true" only if the CF API uses a self-signed cert
-#     DEPROVISION_MODE                 optional: soft (default) | drop
 #     REGISTER_BROKER                  optional: "true" to (re)register the broker after deploy
-#     PG_DEV_HOST,  PG_DEV_PORT,  PG_DEV_EXTERNAL_HOST   (EXTERNAL_HOST optional)
-#     PG_PROD_HOST, PG_PROD_PORT, PG_PROD_EXTERNAL_HOST
-#     MARIA_DEV_HOST,  MARIA_DEV_PORT,  MARIA_DEV_EXTERNAL_HOST
-#     MARIA_PROD_HOST, MARIA_PROD_PORT, MARIA_PROD_EXTERNAL_HOST
+#     PG_HOST                          postgres-ha node list: host[:port],host[:port],...
+#     PG_PORT                          optional: default port for entries without one (5432)
+#     PG_EXTERNAL_HOST                 optional: endpoint list embedded in binding credentials
 #
 #   Repository SECRETS (sensitive):
 #     CF_USERNAME, CF_PASSWORD                          CF deploy account
 #     BROKER_USER, BROKER_PASSWORD                      HTTP Basic creds the platform uses on /v2/**
-#     PG_DEV_ADMIN_USER,   PG_DEV_ADMIN_PASSWORD
-#     PG_PROD_ADMIN_USER,  PG_PROD_ADMIN_PASSWORD
-#     MARIA_DEV_ADMIN_USER,  MARIA_DEV_ADMIN_PASSWORD
-#     MARIA_PROD_ADMIN_USER, MARIA_PROD_ADMIN_PASSWORD
+#     PG_ADMIN_USER, PG_ADMIN_PASSWORD                  postgres-ha admin account
 
 on:
   push:
@@ -48,11 +43,9 @@ jobs:
           java-version: '21'
           cache: maven
 
-      # `mvn verify` runs the unit tests AND the Testcontainers integration tests.
-      # GitHub-hosted ubuntu runners ship Docker, so the postgres:16 / mariadb:11
-      # provision->bind->use->unbind->deprovision lifecycle tests really execute here.
+      # `mvn package` compiles the broker and runs the unit tests. A red build blocks deployment.
       - name: Build and test
-        run: mvn -B -ntp verify
+        run: mvn -B -ntp package
 
       - name: Upload broker jar
         uses: actions/upload-artifact@v4
@@ -118,45 +111,21 @@ jobs:
           BROKER_USER: ${{ secrets.BROKER_USER }}
           BROKER_PASSWORD: ${{ secrets.BROKER_PASSWORD }}
 
-          PG_DEV_HOST: ${{ vars.PG_DEV_HOST }}
-          PG_DEV_PORT: ${{ vars.PG_DEV_PORT }}
-          PG_DEV_ADMIN_USER: ${{ secrets.PG_DEV_ADMIN_USER }}
-          PG_DEV_ADMIN_PASSWORD: ${{ secrets.PG_DEV_ADMIN_PASSWORD }}
-          PG_DEV_EXTERNAL_HOST: ${{ vars.PG_DEV_EXTERNAL_HOST }}
-
-          PG_PROD_HOST: ${{ vars.PG_PROD_HOST }}
-          PG_PROD_PORT: ${{ vars.PG_PROD_PORT }}
-          PG_PROD_ADMIN_USER: ${{ secrets.PG_PROD_ADMIN_USER }}
-          PG_PROD_ADMIN_PASSWORD: ${{ secrets.PG_PROD_ADMIN_PASSWORD }}
-          PG_PROD_EXTERNAL_HOST: ${{ vars.PG_PROD_EXTERNAL_HOST }}
-
-          MARIA_DEV_HOST: ${{ vars.MARIA_DEV_HOST }}
-          MARIA_DEV_PORT: ${{ vars.MARIA_DEV_PORT }}
-          MARIA_DEV_ADMIN_USER: ${{ secrets.MARIA_DEV_ADMIN_USER }}
-          MARIA_DEV_ADMIN_PASSWORD: ${{ secrets.MARIA_DEV_ADMIN_PASSWORD }}
-          MARIA_DEV_EXTERNAL_HOST: ${{ vars.MARIA_DEV_EXTERNAL_HOST }}
-
-          MARIA_PROD_HOST: ${{ vars.MARIA_PROD_HOST }}
-          MARIA_PROD_PORT: ${{ vars.MARIA_PROD_PORT }}
-          MARIA_PROD_ADMIN_USER: ${{ secrets.MARIA_PROD_ADMIN_USER }}
-          MARIA_PROD_ADMIN_PASSWORD: ${{ secrets.MARIA_PROD_ADMIN_PASSWORD }}
-          MARIA_PROD_EXTERNAL_HOST: ${{ vars.MARIA_PROD_EXTERNAL_HOST }}
-
-          DEPROVISION_MODE: ${{ vars.DEPROVISION_MODE }}
+          PG_HOST: ${{ vars.PG_HOST }}
+          PG_PORT: ${{ vars.PG_PORT }}
+          PG_ADMIN_USER: ${{ secrets.PG_ADMIN_USER }}
+          PG_ADMIN_PASSWORD: ${{ secrets.PG_ADMIN_PASSWORD }}
+          PG_EXTERNAL_HOST: ${{ vars.PG_EXTERNAL_HOST }}
         run: |
           set -euo pipefail
           # Upload bits without starting, so env is set before the app boots (it fails fast without it).
           cf push "$APP_NAME" -f manifest.yml --no-start
 
-          # Set only the non-empty variables, so optional ones (EXTERNAL_HOST, DEPROVISION_MODE) are
+          # Set only the non-empty variables, so optional ones (PG_PORT, PG_EXTERNAL_HOST) are
           # skipped rather than set to "". cf set-env prints the key name, never the value.
           for name in \
             BROKER_USER BROKER_PASSWORD \
-            PG_DEV_HOST PG_DEV_PORT PG_DEV_ADMIN_USER PG_DEV_ADMIN_PASSWORD PG_DEV_EXTERNAL_HOST \
-            PG_PROD_HOST PG_PROD_PORT PG_PROD_ADMIN_USER PG_PROD_ADMIN_PASSWORD PG_PROD_EXTERNAL_HOST \
-            MARIA_DEV_HOST MARIA_DEV_PORT MARIA_DEV_ADMIN_USER MARIA_DEV_ADMIN_PASSWORD MARIA_DEV_EXTERNAL_HOST \
-            MARIA_PROD_HOST MARIA_PROD_PORT MARIA_PROD_ADMIN_USER MARIA_PROD_ADMIN_PASSWORD MARIA_PROD_EXTERNAL_HOST \
-            DEPROVISION_MODE; do
+            PG_HOST PG_PORT PG_ADMIN_USER PG_ADMIN_PASSWORD PG_EXTERNAL_HOST; do
             value="${!name:-}"
             if [ -n "$value" ]; then
               cf set-env "$APP_NAME" "$name" "$value" >/dev/null

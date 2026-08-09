@@ -33,10 +33,6 @@ public class BackendRouter {
         return registry.forPlan(planId);
     }
 
-    public List<Backend> siblingBackendsFor(String planId) {
-        return registry.siblingBackends(planId);
-    }
-
     public Provisioner provisionerFor(Backend backend) {
         Provisioner provisioner = provisionersByEngine.get(backend.engine());
         if (provisioner == null) {

@@ -38,6 +38,11 @@ public interface Provisioner {
     /** Terminate the binding's live sessions, then drop its login role/user. Idempotent. */
     void unbind(Backend backend, String instanceGuid, String bindingGuid);
 
-    /** Dispose of the tenant database per the given mode. Callers guarantee the database exists. */
-    void deprovision(Backend backend, String instanceGuid, DeprovisionMode mode);
+    /**
+     * Retire the tenant database: park it out of the way with its data intact and block further
+     * connections to it. This broker never drops a tenant database — un-retiring or purging a
+     * retired database is a deliberate, out-of-band operator action. Callers guarantee the database
+     * exists.
+     */
+    void retire(Backend backend, String instanceGuid);
 }

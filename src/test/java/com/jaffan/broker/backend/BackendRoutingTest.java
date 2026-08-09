@@ -5,9 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.jaffan.broker.catalog.CatalogIds;
 import com.jaffan.broker.naming.PasswordGenerator;
-import com.jaffan.broker.provision.MariaDbProvisioner;
 import com.jaffan.broker.provision.PostgresProvisioner;
-import com.jaffan.broker.provision.Provisioner;
 import com.jaffan.broker.service.BackendRouter;
 import java.util.List;
 import java.util.Map;
@@ -15,50 +13,21 @@ import org.junit.jupiter.api.Test;
 
 class BackendRoutingTest {
 
-    // Backends with null data sources: routing is pure metadata, no connection needed here.
-    private final Backend pgDev = new Backend("pg-dev", DatabaseEngine.POSTGRES, "pg-dev.host", 5432,
+    // Backend with a null data source: routing is pure metadata, no connection needed here.
+    private final Backend postgres = new Backend("postgres-ha", DatabaseEngine.POSTGRES,
+            List.of(new HostPort("pg-ha-0.host", 5432), new HostPort("pg-ha-1.host", 5432)),
             null, "admin", "secret", null);
-    private final Backend pgProd = new Backend("pg-prod", DatabaseEngine.POSTGRES, "pg-prod.host", 5432,
-            null, "admin", "secret", null);
-    private final Backend mariaDev = new Backend("maria-dev", DatabaseEngine.MARIADB, "maria-dev.host",
-            3306, null, "root", "secret", null);
-    private final Backend mariaProd = new Backend("maria-prod", DatabaseEngine.MARIADB, "maria-prod.host",
-            3306, null, "root", "secret", null);
 
-    private final BackendRegistry registry = new BackendRegistry(
-            Map.of(
-                    CatalogIds.POSTGRES_DEV_PLAN_ID, pgDev,
-                    CatalogIds.POSTGRES_PROD_PLAN_ID, pgProd,
-                    CatalogIds.MARIADB_DEV_PLAN_ID, mariaDev,
-                    CatalogIds.MARIADB_PROD_PLAN_ID, mariaProd),
-            Map.of(
-                    CatalogIds.POSTGRES_DEV_PLAN_ID, List.of(CatalogIds.POSTGRES_PROD_PLAN_ID),
-                    CatalogIds.POSTGRES_PROD_PLAN_ID, List.of(CatalogIds.POSTGRES_DEV_PLAN_ID),
-                    CatalogIds.MARIADB_DEV_PLAN_ID, List.of(CatalogIds.MARIADB_PROD_PLAN_ID),
-                    CatalogIds.MARIADB_PROD_PLAN_ID, List.of(CatalogIds.MARIADB_DEV_PLAN_ID)));
+    private final BackendRegistry registry =
+            new BackendRegistry(Map.of(CatalogIds.POSTGRES_SHARED_PLAN_ID, postgres));
 
     @Test
-    void eachPlanRoutesToItsBackendServer() {
-        assertThat(registry.forPlan(CatalogIds.POSTGRES_DEV_PLAN_ID).host()).isEqualTo("pg-dev.host");
-        assertThat(registry.forPlan(CatalogIds.POSTGRES_PROD_PLAN_ID).host()).isEqualTo("pg-prod.host");
-        assertThat(registry.forPlan(CatalogIds.MARIADB_DEV_PLAN_ID).host()).isEqualTo("maria-dev.host");
-        assertThat(registry.forPlan(CatalogIds.MARIADB_PROD_PLAN_ID).host()).isEqualTo("maria-prod.host");
-    }
-
-    @Test
-    void postgresPlansRouteToPostgresEngineAndMariaToMaria() {
-        assertThat(registry.forPlan(CatalogIds.POSTGRES_DEV_PLAN_ID).engine())
+    void theSharedPlanRoutesToThePostgresHaCluster() {
+        assertThat(registry.forPlan(CatalogIds.POSTGRES_SHARED_PLAN_ID)).isEqualTo(postgres);
+        assertThat(registry.forPlan(CatalogIds.POSTGRES_SHARED_PLAN_ID).engine())
                 .isEqualTo(DatabaseEngine.POSTGRES);
-        assertThat(registry.forPlan(CatalogIds.MARIADB_PROD_PLAN_ID).engine())
-                .isEqualTo(DatabaseEngine.MARIADB);
-    }
-
-    @Test
-    void siblingOfADevPlanIsTheProdPlanOnTheSameEngine() {
-        assertThat(registry.siblingBackends(CatalogIds.POSTGRES_DEV_PLAN_ID))
-                .containsExactly(pgProd);
-        assertThat(registry.siblingBackends(CatalogIds.MARIADB_PROD_PLAN_ID))
-                .containsExactly(mariaDev);
+        assertThat(registry.forPlan(CatalogIds.POSTGRES_SHARED_PLAN_ID).hostSpec())
+                .isEqualTo("pg-ha-0.host:5432,pg-ha-1.host:5432");
     }
 
     @Test
@@ -68,14 +37,21 @@ class BackendRoutingTest {
     }
 
     @Test
-    void routerSelectsProvisionerMatchingTheBackendEngine() {
-        PasswordGenerator passwords = new PasswordGenerator();
-        List<Provisioner> provisioners =
-                List.of(new PostgresProvisioner(passwords), new MariaDbProvisioner(passwords));
-        BackendRouter router = new BackendRouter(registry, provisioners);
+    void routerSelectsTheProvisionerMatchingTheBackendEngine() {
+        BackendRouter router = new BackendRouter(registry,
+                List.of(new PostgresProvisioner(new PasswordGenerator())));
 
-        assertThat(router.provisionerFor(pgDev).engine()).isEqualTo(DatabaseEngine.POSTGRES);
-        assertThat(router.provisionerFor(mariaProd).engine()).isEqualTo(DatabaseEngine.MARIADB);
-        assertThat(router.backendFor(CatalogIds.MARIADB_DEV_PLAN_ID)).isEqualTo(mariaDev);
+        assertThat(router.provisionerFor(postgres).engine()).isEqualTo(DatabaseEngine.POSTGRES);
+        assertThat(router.backendFor(CatalogIds.POSTGRES_SHARED_PLAN_ID)).isEqualTo(postgres);
+    }
+
+    @Test
+    void externalHostsDefaultToTheBrokerFacingHosts() {
+        assertThat(postgres.externalHosts()).isEqualTo(postgres.hosts());
+
+        Backend withExternal = new Backend("postgres-ha", DatabaseEngine.POSTGRES,
+                List.of(new HostPort("internal.host", 5432)),
+                List.of(new HostPort("apps.host", 6432)), "admin", "secret", null);
+        assertThat(withExternal.externalHosts()).containsExactly(new HostPort("apps.host", 6432));
     }
 }

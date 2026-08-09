@@ -44,11 +44,12 @@ public final class Identifiers {
     }
 
     /**
-     * Name a soft-deleted database gets renamed/moved to: {@code deleted_<original>_<epochMillis>}.
-     * Still length-validated so we never emit a name Postgres/MariaDB would silently truncate.
+     * Name a retired database gets renamed to: {@code retired_<original>_<epochMillis>}. This broker
+     * never drops a tenant database — deprovision parks it under this name instead. Still
+     * length-validated so we never emit a name Postgres would silently truncate.
      */
-    public static String deletedName(String originalDatabase, long epochMillis, DatabaseEngine engine) {
-        return validate("deleted_" + originalDatabase + "_" + epochMillis, engine);
+    public static String retiredName(String originalDatabase, long epochMillis, DatabaseEngine engine) {
+        return validate("retired_" + originalDatabase + "_" + epochMillis, engine);
     }
 
     /**
@@ -78,13 +79,12 @@ public final class Identifiers {
     /**
      * Quote a <b>previously validated</b> identifier for the target engine. Because {@link #validate}
      * guarantees {@code [a-z0-9_]} only, the quote character can never appear inside the identifier, so
-     * this cannot be used to break out of the quotes. Postgres uses double quotes, MariaDB backticks.
+     * this cannot be used to break out of the quotes.
      */
     public static String quote(String identifier, DatabaseEngine engine) {
         validate(identifier, engine);
         return switch (engine) {
             case POSTGRES -> "\"" + identifier + "\"";
-            case MARIADB -> "`" + identifier + "`";
         };
     }
 }

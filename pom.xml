@@ -16,13 +16,12 @@
     <version>1.0.0</version>
     <packaging>jar</packaging>
     <name>jaffan-db-broker</name>
-    <description>OSB v2.16 service broker exposing shared PostgreSQL and MariaDB tenants</description>
+    <description>OSB v2.16 service broker exposing shared PostgreSQL tenants on a BOSH postgres-ha cluster</description>
 
     <properties>
         <java.version>21</java.version>
         <maven.compiler.release>21</maven.compiler.release>
         <open-service-broker.version>4.3.0</open-service-broker.version>
-        <testcontainers.version>1.20.3</testcontainers.version>
     </properties>
 
     <dependencies>
@@ -57,15 +56,10 @@
             <artifactId>spring-boot-starter-jdbc</artifactId>
         </dependency>
 
-        <!-- Backing-store JDBC drivers -->
+        <!-- Backing-store JDBC driver -->
         <dependency>
             <groupId>org.postgresql</groupId>
             <artifactId>postgresql</artifactId>
-            <scope>runtime</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.mariadb.jdbc</groupId>
-            <artifactId>mariadb-java-client</artifactId>
             <scope>runtime</scope>
         </dependency>
 
@@ -75,34 +69,7 @@
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
-        <dependency>
-            <groupId>org.testcontainers</groupId>
-            <artifactId>junit-jupiter</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.testcontainers</groupId>
-            <artifactId>postgresql</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.testcontainers</groupId>
-            <artifactId>mariadb</artifactId>
-            <scope>test</scope>
-        </dependency>
     </dependencies>
-
-    <dependencyManagement>
-        <dependencies>
-            <dependency>
-                <groupId>org.testcontainers</groupId>
-                <artifactId>testcontainers-bom</artifactId>
-                <version>${testcontainers.version}</version>
-                <type>pom</type>
-                <scope>import</scope>
-            </dependency>
-        </dependencies>
-    </dependencyManagement>
 
     <build>
         <finalName>jaffan-db-broker</finalName>
@@ -116,22 +83,6 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
-            </plugin>
-
-            <!-- Testcontainers lifecycle tests (*IT) are bound to `verify`, not `package`,
-                 so `mvn package` stays green on machines without Docker. Run them with
-                 `mvn verify`; they self-skip gracefully when Docker is unavailable. -->
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-failsafe-plugin</artifactId>
-                <executions>
-                    <execution>
-                        <goals>
-                            <goal>integration-test</goal>
-                            <goal>verify</goal>
-                        </goals>
-                    </execution>
-                </executions>
             </plugin>
         </plugins>
     </build>

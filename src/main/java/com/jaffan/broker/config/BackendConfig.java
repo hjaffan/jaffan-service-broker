@@ -3,8 +3,8 @@ package com.jaffan.broker.config;
 import com.jaffan.broker.backend.Backend;
 import com.jaffan.broker.backend.BackendRegistry;
 import com.jaffan.broker.backend.DatabaseEngine;
+import com.jaffan.broker.backend.HostPort;
 import com.jaffan.broker.catalog.CatalogIds;
-import com.jaffan.broker.provision.DeprovisionMode;
 import com.zaxxer.hikari.HikariDataSource;
 import java.util.List;
 import java.util.Map;
@@ -15,13 +15,15 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
 
 /**
- * Wires the four backing database servers from environment variables into {@link Backend}s and a
- * {@link BackendRegistry}, and enforces fail-fast startup: every configured backend is probed with
- * {@code SELECT 1}, one masked line is logged per backend (host and admin user, never the password),
- * and the context refuses to start if any backend is unreachable.
+ * Wires the postgres-ha cluster from environment variables into a {@link Backend} and a
+ * {@link BackendRegistry}, and enforces fail-fast startup: the backend is probed with
+ * {@code SELECT 1}, one masked line is logged (hosts and admin user, never the password), and the
+ * context refuses to start if the cluster is unreachable.
  *
- * <p>Each backend gets its own tiny HikariCP pool (max 2 connections) pointed at that engine's
- * maintenance database ({@code postgres} / {@code mysql}).
+ * <p>{@code PG_HOST} may list several cluster nodes ({@code host[:port],...}); the admin pool uses a
+ * multi-host JDBC URL with {@code targetServerType=primary}, so the broker follows a postgres-ha
+ * failover automatically. The pool is tiny (max 2 connections) and points at the {@code postgres}
+ * maintenance database.
  */
 @Configuration
 public class BackendConfig {
@@ -29,92 +31,39 @@ public class BackendConfig {
     private static final Logger log = LoggerFactory.getLogger(BackendConfig.class);
 
     @Bean(destroyMethod = "close")
-    public HikariDataSource pgDevDataSource(Environment env) {
-        return pool(env, "PG_DEV", DatabaseEngine.POSTGRES);
-    }
-
-    @Bean(destroyMethod = "close")
-    public HikariDataSource pgProdDataSource(Environment env) {
-        return pool(env, "PG_PROD", DatabaseEngine.POSTGRES);
-    }
-
-    @Bean(destroyMethod = "close")
-    public HikariDataSource mariaDevDataSource(Environment env) {
-        return pool(env, "MARIA_DEV", DatabaseEngine.MARIADB);
-    }
-
-    @Bean(destroyMethod = "close")
-    public HikariDataSource mariaProdDataSource(Environment env) {
-        return pool(env, "MARIA_PROD", DatabaseEngine.MARIADB);
-    }
-
-    @Bean
-    public DeprovisionMode deprovisionMode(Environment env) {
-        DeprovisionMode mode = DeprovisionMode.fromEnv(env.getProperty("DEPROVISION_MODE"));
-        log.info("startup deprovision_mode={}", mode.name().toLowerCase());
-        return mode;
-    }
-
-    @Bean
-    public BackendRegistry backendRegistry(Environment env,
-            HikariDataSource pgDevDataSource, HikariDataSource pgProdDataSource,
-            HikariDataSource mariaDevDataSource, HikariDataSource mariaProdDataSource) {
-
-        Backend pgDev = backend(env, "pg-dev", "PG_DEV", DatabaseEngine.POSTGRES, pgDevDataSource);
-        Backend pgProd = backend(env, "pg-prod", "PG_PROD", DatabaseEngine.POSTGRES, pgProdDataSource);
-        Backend mariaDev = backend(env, "maria-dev", "MARIA_DEV", DatabaseEngine.MARIADB, mariaDevDataSource);
-        Backend mariaProd = backend(env, "maria-prod", "MARIA_PROD", DatabaseEngine.MARIADB, mariaProdDataSource);
-
-        for (Backend backend : List.of(pgDev, pgProd, mariaDev, mariaProd)) {
-            validate(backend);
-        }
-
-        Map<String, Backend> byPlan = Map.of(
-                CatalogIds.POSTGRES_DEV_PLAN_ID, pgDev,
-                CatalogIds.POSTGRES_PROD_PLAN_ID, pgProd,
-                CatalogIds.MARIADB_DEV_PLAN_ID, mariaDev,
-                CatalogIds.MARIADB_PROD_PLAN_ID, mariaProd);
-
-        Map<String, List<String>> siblings = Map.of(
-                CatalogIds.POSTGRES_DEV_PLAN_ID, List.of(CatalogIds.POSTGRES_PROD_PLAN_ID),
-                CatalogIds.POSTGRES_PROD_PLAN_ID, List.of(CatalogIds.POSTGRES_DEV_PLAN_ID),
-                CatalogIds.MARIADB_DEV_PLAN_ID, List.of(CatalogIds.MARIADB_PROD_PLAN_ID),
-                CatalogIds.MARIADB_PROD_PLAN_ID, List.of(CatalogIds.MARIADB_DEV_PLAN_ID));
-
-        return new BackendRegistry(byPlan, siblings);
-    }
-
-    /** Build the maintenance-DB connection pool for one backend from its {@code <PREFIX>_*} env vars. */
-    private HikariDataSource pool(Environment env, String prefix, DatabaseEngine engine) {
-        String host = required(env, prefix + "_HOST");
-        int port = port(env, prefix, engine);
-        String user = required(env, prefix + "_ADMIN_USER");
-        String password = required(env, prefix + "_ADMIN_PASSWORD");
-
-        String url = engine.jdbcScheme() + "://" + host + ":" + port + "/" + engine.maintenanceDatabase();
+    public HikariDataSource postgresDataSource(Environment env) {
+        List<HostPort> hosts = hosts(env);
+        String url = DatabaseEngine.POSTGRES.jdbcScheme() + "://" + HostPort.join(hosts) + "/"
+                + DatabaseEngine.POSTGRES.maintenanceDatabase() + "?targetServerType=primary";
 
         HikariDataSource ds = new HikariDataSource();
-        ds.setPoolName(prefix.toLowerCase().replace('_', '-') + "-admin");
+        ds.setPoolName("postgres-ha-admin");
         ds.setJdbcUrl(url);
-        ds.setUsername(user);
-        ds.setPassword(password);
+        ds.setUsername(required(env, "PG_ADMIN_USER"));
+        ds.setPassword(required(env, "PG_ADMIN_PASSWORD"));
         ds.setMaximumPoolSize(2);
         ds.setMinimumIdle(0);
         ds.setConnectionTimeout(10_000);
-        ds.setAutoCommit(true); // required so CREATE/DROP DATABASE run outside a transaction
+        ds.setAutoCommit(true); // required so CREATE/ALTER DATABASE run outside a transaction
         // Defer the actual connection to our own SELECT 1 probe, so failures surface with a clear message.
         ds.setInitializationFailTimeout(-1);
         return ds;
     }
 
-    private Backend backend(Environment env, String key, String prefix, DatabaseEngine engine,
-            HikariDataSource dataSource) {
-        String host = required(env, prefix + "_HOST");
-        int port = port(env, prefix, engine);
-        String externalHost = env.getProperty(prefix + "_EXTERNAL_HOST");
-        String user = required(env, prefix + "_ADMIN_USER");
-        String password = required(env, prefix + "_ADMIN_PASSWORD");
-        return new Backend(key, engine, host, port, externalHost, user, password, dataSource);
+    @Bean
+    public BackendRegistry backendRegistry(Environment env, HikariDataSource postgresDataSource) {
+        List<HostPort> externalHosts = null;
+        String externalRaw = env.getProperty("PG_EXTERNAL_HOST");
+        if (externalRaw != null && !externalRaw.isBlank()) {
+            externalHosts = HostPort.parseList(externalRaw, defaultPort(env));
+        }
+
+        Backend postgres = new Backend("postgres-ha", DatabaseEngine.POSTGRES, hosts(env),
+                externalHosts, required(env, "PG_ADMIN_USER"), required(env, "PG_ADMIN_PASSWORD"),
+                postgresDataSource);
+        validate(postgres);
+
+        return new BackendRegistry(Map.of(CatalogIds.POSTGRES_SHARED_PLAN_ID, postgres));
     }
 
     /** Probe the backend with {@code SELECT 1}; log a masked line on success, fail fast on error. */
@@ -132,15 +81,20 @@ public class BackendConfig {
         }
     }
 
-    private int port(Environment env, String prefix, DatabaseEngine engine) {
-        String raw = env.getProperty(prefix + "_PORT");
+    private List<HostPort> hosts(Environment env) {
+        return HostPort.parseList(required(env, "PG_HOST"), defaultPort(env));
+    }
+
+    /** Port for host entries without an explicit one: {@code PG_PORT}, defaulting to 5432. */
+    private int defaultPort(Environment env) {
+        String raw = env.getProperty("PG_PORT");
         if (raw == null || raw.isBlank()) {
-            return engine.defaultPort();
+            return DatabaseEngine.POSTGRES.defaultPort();
         }
         try {
             return Integer.parseInt(raw.trim());
         } catch (NumberFormatException e) {
-            throw new IllegalStateException(prefix + "_PORT is not a valid integer: " + raw);
+            throw new IllegalStateException("PG_PORT is not a valid integer: " + raw);
         }
     }
 

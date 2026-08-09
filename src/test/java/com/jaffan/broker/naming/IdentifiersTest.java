@@ -25,14 +25,13 @@ class IdentifiersTest {
     void ownerAndBindingRolesUseTheirPrefixes() {
         assertThat(Identifiers.ownerRole(GUID, DatabaseEngine.POSTGRES))
                 .isEqualTo("o_a1b2c3d4_e5f6_7890_abcd_ef1234567890");
-        assertThat(Identifiers.bindingRole(GUID, DatabaseEngine.MARIADB))
+        assertThat(Identifiers.bindingRole(GUID, DatabaseEngine.POSTGRES))
                 .isEqualTo("b_a1b2c3d4_e5f6_7890_abcd_ef1234567890");
     }
 
     @Test
-    void quotingUsesEngineSpecificDelimiters() {
+    void quotingUsesDoubleQuotes() {
         assertThat(Identifiers.quote("si_abc", DatabaseEngine.POSTGRES)).isEqualTo("\"si_abc\"");
-        assertThat(Identifiers.quote("si_abc", DatabaseEngine.MARIADB)).isEqualTo("`si_abc`");
     }
 
     @Test
@@ -51,8 +50,6 @@ class IdentifiersTest {
         assertThatThrownBy(() -> Identifiers.validate("has space", DatabaseEngine.POSTGRES))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> Identifiers.validate("dash-not-allowed", DatabaseEngine.POSTGRES))
-                .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> Identifiers.validate("backtick`", DatabaseEngine.MARIADB))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -78,28 +75,17 @@ class IdentifiersTest {
     }
 
     @Test
-    void enforcesMariaDbLengthLimitOf64() {
-        String sixtyFour = "a".repeat(64);
-        assertThat(Identifiers.validate(sixtyFour, DatabaseEngine.MARIADB)).isEqualTo(sixtyFour);
-        assertThatThrownBy(() -> Identifiers.validate("a".repeat(65), DatabaseEngine.MARIADB))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("64");
-    }
-
-    @Test
-    void deletedNameStaysWithinLengthLimit() {
+    void retiredNameIsPrefixedAndStaysWithinLengthLimit() {
         String db = Identifiers.instanceDatabase(GUID, DatabaseEngine.POSTGRES);
-        String parked = Identifiers.deletedName(db, 1_700_000_000_000L, DatabaseEngine.POSTGRES);
-        assertThat(parked).startsWith("deleted_si_");
-        assertThat(parked.length()).isLessThanOrEqualTo(63);
+        String retired = Identifiers.retiredName(db, 1_700_000_000_000L, DatabaseEngine.POSTGRES);
+        assertThat(retired).isEqualTo("retired_" + db + "_1700000000000");
+        assertThat(retired.length()).isLessThanOrEqualTo(63);
     }
 
     @Test
-    void realGuidBasedNamesFitBothEngines() {
-        // Worst case: si_<36-char guid underscored> must fit 63 (PG) and 64 (Maria).
-        String pg = Identifiers.instanceDatabase(GUID, DatabaseEngine.POSTGRES);
-        String maria = Identifiers.instanceDatabase(GUID, DatabaseEngine.MARIADB);
-        assertThat(pg.length()).isLessThanOrEqualTo(63);
-        assertThat(maria.length()).isLessThanOrEqualTo(64);
+    void realGuidBasedNamesFitPostgres() {
+        // Worst case: si_<36-char guid underscored> must fit 63.
+        assertThat(Identifiers.instanceDatabase(GUID, DatabaseEngine.POSTGRES).length())
+                .isLessThanOrEqualTo(63);
     }
 }

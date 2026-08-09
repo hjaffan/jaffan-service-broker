@@ -21,9 +21,12 @@ import org.springframework.jdbc.core.JdbcTemplate;
  * so every table/index/sequence the app creates is owned by {@code o_x}, not the ephemeral binding
  * role. Dropping {@code b_y} on unbind then only has to shed the CONNECT grant we handed it.
  *
- * <p>DDL that Postgres forbids inside a transaction ({@code CREATE/DROP/ALTER DATABASE}) is issued
+ * <p>DDL that Postgres forbids inside a transaction ({@code CREATE/ALTER DATABASE}) is issued
  * through {@link JdbcTemplate#execute}, which runs on an autocommit connection — we never wrap these in
  * a transaction.
+ *
+ * <p>Deprovision never drops anything: it renames the tenant database to
+ * {@code retired_<original>_<epochMillis>} and blocks connections to it (see {@link #retire}).
  */
 public class PostgresProvisioner implements Provisioner {
 
@@ -133,26 +136,23 @@ public class PostgresProvisioner implements Provisioner {
     }
 
     @Override
-    public void deprovision(Backend backend, String instanceGuid, DeprovisionMode mode) {
+    public void retire(Backend backend, String instanceGuid) {
         JdbcTemplate jdbc = backend.jdbc();
         String db = Identifiers.instanceDatabase(instanceGuid, engine());
-        String owner = Identifiers.ownerRole(instanceGuid, engine());
         String dbQ = Identifiers.quote(db, engine());
-        String ownerQ = Identifiers.quote(owner, engine());
 
-        // Terminate every connection to the tenant DB — required before rename or drop.
+        // Terminate every connection to the tenant DB — required before the rename.
         jdbc.queryForList("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = ?",
                 Object.class, db);
 
-        if (mode == DeprovisionMode.SOFT) {
-            long epoch = System.currentTimeMillis();
-            String parked = Identifiers.deletedName(db, epoch, engine());
-            // Rename out of the way; keep o_x since it still owns the parked database.
-            jdbc.execute("ALTER DATABASE " + dbQ + " RENAME TO " + Identifiers.quote(parked, engine()));
-        } else {
-            jdbc.execute("DROP DATABASE IF EXISTS " + dbQ);
-            jdbc.execute("DROP ROLE IF EXISTS " + ownerQ);
-        }
+        long epoch = System.currentTimeMillis();
+        String retired = Identifiers.retiredName(db, epoch, engine());
+        String retiredQ = Identifiers.quote(retired, engine());
+        // Rename out of the way; keep o_x since it still owns the retired database.
+        jdbc.execute("ALTER DATABASE " + dbQ + " RENAME TO " + retiredQ);
+        // Freeze the retired copy: nobody (not even admin) connects until an operator re-enables it
+        // with ALTER DATABASE ... WITH ALLOW_CONNECTIONS true.
+        jdbc.execute("ALTER DATABASE " + retiredQ + " WITH ALLOW_CONNECTIONS false");
     }
 
     private boolean roleExists(JdbcTemplate jdbc, String role) {

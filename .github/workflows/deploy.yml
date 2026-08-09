@@ -104,6 +104,8 @@ jobs:
           fi
           cf api "$CF_API" $SSL_FLAG
           cf auth                      # uses CF_USERNAME / CF_PASSWORD from the environment
+          # Create the target space on first deploy; prints a warning and succeeds if it exists.
+          cf create-space "$CF_SPACE" -o "$CF_ORG"
           cf target -o "$CF_ORG" -s "$CF_SPACE"
 
       - name: Push, configure env, and start

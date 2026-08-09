@@ -110,6 +110,19 @@ jobs:
           cf create-space "$CF_SPACE" -o "$CF_ORG"
           cf target -o "$CF_ORG" -s "$CF_SPACE"
 
+      - name: Ensure DB egress security group
+        run: |
+          set -euo pipefail
+          # App containers (broker + bound apps, platform-wide) need egress to the postgres-ha
+          # nodes; bind-running only affects containers started afterwards, and the broker app is
+          # started in the next step.
+          if cf security-groups | awk '{print $1}' | grep -qx "db-egress"; then
+            cf update-security-group db-egress deploy/db-egress-asg.json
+          else
+            cf create-security-group db-egress deploy/db-egress-asg.json
+          fi
+          cf bind-running-security-group db-egress
+
       - name: Push, configure env, and start
         env:
           BROKER_USER: ${{ secrets.BROKER_USER }}

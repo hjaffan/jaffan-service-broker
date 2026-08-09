@@ -136,7 +136,13 @@ jobs:
             fi
           done
 
-          cf start "$APP_NAME"
+          cf start "$APP_NAME" || {
+            echo "=== app failed to start; recent logs ==="
+            cf logs "$APP_NAME" --recent | tail -150 || true
+            echo "=== recent app events ==="
+            cf events "$APP_NAME" || true
+            exit 1
+          }
 
       - name: Register / update service broker (optional)
         if: ${{ vars.REGISTER_BROKER == 'true' }}

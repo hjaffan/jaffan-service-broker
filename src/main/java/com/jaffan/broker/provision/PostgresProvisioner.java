@@ -56,6 +56,10 @@ public class PostgresProvisioner implements Provisioner {
         if (!roleExists(jdbc, owner)) {
             jdbc.execute("CREATE ROLE " + ownerQ + " NOLOGIN");
         }
+        // A non-superuser admin must be a member of o_x to create a database owned by it (and later
+        // to rename it at retirement). CREATEROLE lets the admin self-grant on every PG version;
+        // a plain no-op NOTICE if already a member.
+        jdbc.execute("GRANT " + ownerQ + " TO CURRENT_USER");
         jdbc.execute("CREATE DATABASE " + dbQ + " OWNER " + ownerQ);
         jdbc.execute("REVOKE ALL ON DATABASE " + dbQ + " FROM PUBLIC");
 

@@ -209,15 +209,19 @@ cf app jaffan-db-broker            # note the "routes:" line, e.g. jaffan-db-bro
 
 ### The broker's admin account on postgres-ha
 
-Create a dedicated role on the cluster for the broker (as a superuser):
+Create a dedicated role on the cluster for the broker (as a superuser, on the current primary):
 
 ```sql
 CREATE ROLE broker_admin LOGIN PASSWORD '...' CREATEDB CREATEROLE;
+-- lets the broker terminate tenant/binding sessions during unbind and retire
+GRANT pg_signal_backend TO broker_admin;
 ```
 
-`CREATEDB` + `CREATEROLE` cover provision/bind/unbind. Retirement renames databases owned by roles
-the broker created, so it works with the same account. Add the account to `pg_hba.conf` (or the
-postgres-ha release's equivalent property) for the CF container network.
+No superuser needed: `CREATEDB` + `CREATEROLE` cover provision/bind/unbind, the broker grants
+itself membership in each `o_x` owner role it creates (required to create and later rename the
+databases they own), and `pg_signal_backend` covers connection termination. Verified against
+PostgreSQL 12 and 16. Add the account to `pg_hba.conf` (or the postgres-ha release's equivalent
+property) for the CF container network.
 
 ---
 

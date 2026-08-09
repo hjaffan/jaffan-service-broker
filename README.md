@@ -134,8 +134,10 @@ GitHub runner, then `cf push`es the resulting jar to your (publicly reachable) C
 * **Build job** (runs on every push and PR to `main`): `mvn -B package` — compiles the broker and
   runs the unit tests. A red build blocks deployment.
 * **Deploy job** (only on push to `main`): downloads the jar, installs the cf CLI v8, authenticates,
-  `cf push --no-start`, sets every configured env var, then `cf start`. Optionally (re)registers the
-  broker when the `REGISTER_BROKER` variable is `true`.
+  creates the target space if needed, `cf push --no-start`, sets every configured env var, then
+  `cf start`. When the `REGISTER_BROKER` variable is `true` it also registers the broker
+  **globally** and runs `cf enable-service-access postgres` so the plan is marketplace-visible in
+  every org (this requires the deploy account to be a CF admin).
 
 > The classic CF Java buildpack does not compile source — that's exactly why the jar is built on the
 > runner and pushed, rather than pushing `src/`.

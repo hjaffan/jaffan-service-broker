@@ -8,7 +8,9 @@ name: CI / Deploy to Cloud Foundry
 #   Repository VARIABLES (non-sensitive):
 #     CF_API, CF_ORG, CF_SPACE
 #     CF_SKIP_SSL_VALIDATION           "true" only if the CF API uses a self-signed cert
-#     REGISTER_BROKER                  optional: "true" to (re)register the broker after deploy
+#     REGISTER_BROKER                  optional: "true" to (re)register the broker globally after
+#                                      deploy and enable marketplace access in all orgs (needs a
+#                                      CF admin deploy account)
 #     PG_HOST                          postgres-ha node list: host[:port],host[:port],...
 #     PG_PORT                          optional: default port for entries without one (5432)
 #     PG_EXTERNAL_HOST                 optional: endpoint list embedded in binding credentials
@@ -150,9 +152,11 @@ jobs:
           fi
           url="https://${route}"
           echo "broker url: ${url}"
+          # Global (platform-wide) registration; requires a CF admin deploy account.
           if cf service-brokers | awk '{print $1}' | grep -qx "$BROKER_NAME"; then
             cf update-service-broker "$BROKER_NAME" "$BROKER_USER" "$BROKER_PASSWORD" "$url"
           else
-            # Space-scoped registration needs no CF admin. Promote to global manually (see README).
-            cf create-service-broker "$BROKER_NAME" "$BROKER_USER" "$BROKER_PASSWORD" "$url" --space-scoped
+            cf create-service-broker "$BROKER_NAME" "$BROKER_USER" "$BROKER_PASSWORD" "$url"
           fi
+          # Make every plan visible in the marketplace of every org.
+          cf enable-service-access postgres

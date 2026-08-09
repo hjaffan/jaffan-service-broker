@@ -116,7 +116,10 @@ jobs:
           # App containers (broker + bound apps, platform-wide) need egress to the postgres-ha
           # nodes; bind-running only affects containers started afterwards, and the broker app is
           # started in the next step.
-          if cf security-groups | awk '{print $1}' | grep -qx "db-egress"; then
+          # Capture first, then grep: an early-exiting reader in a pipeline SIGPIPEs cf under
+          # pipefail (exit 141).
+          groups="$(cf security-groups)"
+          if grep -qE '^db-egress[[:space:]]' <<<"$groups"; then
             cf update-security-group db-egress deploy/db-egress-asg.json
           else
             cf create-security-group db-egress deploy/db-egress-asg.json
@@ -164,7 +167,10 @@ jobs:
           BROKER_PASSWORD: ${{ secrets.BROKER_PASSWORD }}
         run: |
           set -euo pipefail
-          route="$(cf app "$APP_NAME" | awk '/^routes:/ {print $2; exit}')"
+          # Capture first, then parse: an early-exiting awk/grep in a pipeline SIGPIPEs cf under
+          # pipefail (exit 141).
+          app_info="$(cf app "$APP_NAME")"
+          route="$(awk '/^routes:/ {print $2; exit}' <<<"$app_info")"
           if [ -z "$route" ]; then
             echo "could not determine app route; skipping broker registration" >&2
             exit 1
@@ -172,7 +178,8 @@ jobs:
           url="https://${route}"
           echo "broker url: ${url}"
           # Global (platform-wide) registration; requires a CF admin deploy account.
-          if cf service-brokers | awk '{print $1}' | grep -qx "$BROKER_NAME"; then
+          brokers="$(cf service-brokers)"
+          if grep -qE "^${BROKER_NAME}[[:space:]]" <<<"$brokers"; then
             cf update-service-broker "$BROKER_NAME" "$BROKER_USER" "$BROKER_PASSWORD" "$url"
           else
             cf create-service-broker "$BROKER_NAME" "$BROKER_USER" "$BROKER_PASSWORD" "$url"

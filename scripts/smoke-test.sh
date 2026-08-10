@@ -36,16 +36,16 @@ cf create-service-key "${SI}" "${KEY}"
 
 # Extract the credentials JSON. `cf service-key` prints a human header then the JSON body.
 creds_json="$(cf service-key "${SI}" "${KEY}" | sed -n '/{/,$p')"
-host="$(echo "${creds_json}"     | jq -r '.credentials.host')"
-port="$(echo "${creds_json}"     | jq -r '.credentials.port')"
-db="$(echo "${creds_json}"       | jq -r '.credentials.database')"
-user="$(echo "${creds_json}"     | jq -r '.credentials.username')"
-password="$(echo "${creds_json}" | jq -r '.credentials.password')"
-echo "   host=${host} port=${port} db=${db} user=${user} (password hidden)"
+uri="$(echo "${creds_json}"  | jq -r '.credentials.uri')"
+db="$(echo "${creds_json}"   | jq -r '.credentials.database')"
+user="$(echo "${creds_json}" | jq -r '.credentials.username')"
+echo "   db=${db} user=${user} (connecting via the multi-host uri, pinned to the primary)"
 
 echo ">> connect & query as the bound user"
-PGPASSWORD="${password}" psql -h "${host}" -p "${port}" -U "${user}" -d "${db}" \
-  -v ON_ERROR_STOP=1 -c "CREATE TABLE IF NOT EXISTS smoke (id int); INSERT INTO smoke VALUES (1); SELECT count(*) FROM smoke;"
+# Use the uri credential: with several cluster nodes, host/port alone may point at a standby;
+# the uri carries every node plus target_session_attrs=read-write, so libpq finds the primary.
+psql "${uri}" -v ON_ERROR_STOP=1 \
+  -c "CREATE TABLE IF NOT EXISTS smoke (id int); INSERT INTO smoke VALUES (1); SELECT count(*) FROM smoke;"
 
 echo ">> unbind (delete-service-key) ${KEY}"
 cf delete-service-key -f "${SI}" "${KEY}"

@@ -50,7 +50,7 @@ jobs:
         run: mvn -B -ntp package
 
       - name: Upload broker jar
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: broker-jar
           path: target/jaffan-db-broker.jar

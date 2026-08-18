@@ -1,7 +1,7 @@
 [
   {
     "protocol": "tcp",
-    "destination": "10.0.4.59-10.0.4.61",
+    "destination": "10.0.4.58-10.0.4.60",
     "ports": "5432",
     "description": "Allow app containers to reach the postgres-ha cluster"
   }

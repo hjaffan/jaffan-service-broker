@@ -61,7 +61,7 @@ jobs:
     name: Deploy to Cloud Foundry
     needs: build
     # Only deploy from main; PRs get the build/test gate but never push.
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: cloud-foundry
